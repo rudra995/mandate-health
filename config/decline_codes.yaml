@@ -1,0 +1,72 @@
+# -----------------------------------------------------------------------------
+# Decline code taxonomy
+#
+# The split below is the single most consequential classification in the system:
+# it is what lets the retry allocator (Phase 3) refuse to spend a scarce attempt
+# on a decline that retrying cannot fix.
+#
+#   recoverable -> eligible for the retry budget, subject to EV
+#   terminal    -> ZERO retries, escalate to the merchant immediately
+#
+# NPCI allows 1 original attempt + a maximum of 3 retries. Spending one of
+# those three on a revoked mandate is not a small inefficiency; it is the whole
+# budget wasted on an outcome that was decided before the attempt was made.
+# -----------------------------------------------------------------------------
+
+version: 1
+
+classes:
+  recoverable: "The underlying condition may change before the retry budget is exhausted."
+  terminal: "The mandate or account cannot execute a debit at all. Retrying is spend with no upside."
+
+codes:
+
+  # -- Recoverable ------------------------------------------------------------
+  insufficient_funds:
+    code: insufficient_funds
+    class: recoverable
+    retry_eligible: true
+    description: "Payer's account balance was below the debit amount at presentation. The dominant cause of autopay failure and the only one that timing can address."
+
+  technical_timeout:
+    code: technical_timeout
+    class: recoverable
+    retry_eligible: true
+    description: "The transaction did not complete within the rail's response window. Transient; unrelated to balance or mandate state."
+
+  psp_unavailable:
+    code: psp_unavailable
+    class: recoverable
+    retry_eligible: true
+    description: "The payer's PSP or issuing bank leg was degraded or unreachable at presentation. Recovers on its own timescale, typically hours to a few days."
+
+  slot_restricted:
+    code: slot_restricted
+    class: recoverable
+    retry_eligible: true
+    description: "Debit was presented inside the restricted 10:00-12:59 IST peak window and was declined on rail-capacity grounds. Fully avoidable by choosing a permitted slot."
+
+  # -- Terminal ---------------------------------------------------------------
+  mandate_revoked:
+    code: mandate_revoked
+    class: terminal
+    retry_eligible: false
+    description: "The payer cancelled the mandate. No further debit can be presented; re-authorisation requires a fresh mandate and a fresh UPI PIN."
+
+  mandate_expired:
+    code: mandate_expired
+    class: terminal
+    retry_eligible: false
+    description: "The mandate passed its validity end date. Extending validity is a mandate modification and requires payer UPI PIN re-authorisation."
+
+  account_closed:
+    code: account_closed
+    class: terminal
+    retry_eligible: false
+    description: "The underlying bank account no longer exists. Nothing at the aggregator layer can recover this."
+
+  mandate_paused:
+    code: mandate_paused
+    class: terminal
+    retry_eligible: false
+    description: "The payer paused the mandate, commonly after a pre-debit notification. Terminal for the current cycle: only the payer can resume, and resuming requires UPI PIN re-authorisation."

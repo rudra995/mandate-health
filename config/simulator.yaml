@@ -1,0 +1,273 @@
+# -----------------------------------------------------------------------------
+# Mandate Health Service - synthetic world parameters
+#
+# This file is the ONLY place simulator numbers live. No magic numbers in code.
+# Every value here has a row in docs/ASSUMPTIONS.md stating where it came from.
+#
+# GOVERNING RULE: this world is written as if the predictor does not exist.
+# No parameter here was chosen to make a downstream model look good.
+# -----------------------------------------------------------------------------
+
+meta:
+  version: "0.1.0"
+  timezone: "Asia/Kolkata"
+
+simulation:
+  start_date: "2025-09-01"   # month of the first debit cycle
+  warmup_days: 45            # balance history before the first cycle, so the
+                             # first cycle is not debited off a synthetic zero
+  n_cycles: 6
+  base_seed: 42
+
+population:
+  n_payers: 400
+  mandates_per_payer:
+    min: 3
+    max: 5
+
+# -- Income -------------------------------------------------------------------
+# Monthly net income in rupees. Bands are coarse on purpose: the simulator is
+# not modelling the Indian income distribution, only producing payers whose
+# obligations are large or small relative to what lands in the account.
+income:
+  bands:
+    - name: low
+      monthly_amount: 25000
+      weight: 0.30
+    - name: lower_mid
+      monthly_amount: 45000
+      weight: 0.30
+    - name: mid
+      monthly_amount: 80000
+      weight: 0.25
+    - name: upper
+      monthly_amount: 150000
+      weight: 0.15
+  # Per-payer multiplicative jitter so two payers in a band are not identical.
+  jitter_lognormal_sigma: 0.15
+
+# Income day is a MIXTURE, not a single cluster. The mixture matters: a single
+# cluster would make day-of-month failure a global calendar effect that any one
+# merchant could learn from its own book. Heterogeneity across payers is what
+# makes cross-merchant payer history genuinely informative.
+income_day:
+  segments:
+    - name: salaried_early
+      weight: 0.60
+      days:        [1, 2, 3, 4, 5, 6, 7]
+      day_weights: [0.26, 0.22, 0.16, 0.12, 0.10, 0.08, 0.06]
+      day_jitter: 0            # salary lands on the same day each month
+      monthly_variation_sigma: 0.03
+    - name: salaried_midmonth
+      weight: 0.20
+      days:        [14, 15, 16, 17, 18]
+      day_weights: [0.20, 0.30, 0.22, 0.16, 0.12]
+      day_jitter: 0
+      monthly_variation_sigma: 0.03
+    - name: irregular
+      weight: 0.20
+      uniform_range: [1, 28]   # gig / self-employed: no fixed payday
+      day_jitter: 3            # drifts +/- 3 days month to month
+      monthly_variation_sigma: 0.22
+
+# -- Spending -----------------------------------------------------------------
+# spend_ratio = share of monthly income consumed by discretionary spend.
+# The "comfortable" segment exists so a genuinely low-risk class is present in
+# the world. Without it, restraint (do_nothing) would never be the correct
+# answer, only the cheap one.
+spend:
+  segments:
+    - name: stretched
+      weight: 0.85
+      distribution: beta
+      alpha: 3.4
+      beta: 2.0
+      lo: 0.55
+      hi: 0.98
+    - name: comfortable
+      weight: 0.15
+      distribution: beta
+      alpha: 2.0
+      beta: 2.0
+      lo: 0.45
+      hi: 0.60
+  # Per-payer daily lognormal noise on the smoothed daily spend rate.
+  daily_volatility_sigma:
+    lo: 0.35
+    hi: 0.75
+  weekend_multiplier: 1.25
+  # Opening balance as a fraction of monthly income, drawn per payer.
+  opening_balance_fraction:
+    lo: 0.05
+    hi: 0.45
+  # Surplus does not sit in a current account forever. On each income day a
+  # share of the balance above the payer's target buffer is swept out to
+  # savings. Without this, every payer whose spend_ratio is below 1 accumulates
+  # indefinitely and the failure rate falls monotonically across cycles - an
+  # artifact a reader would spot immediately.
+  savings_sweep:
+    rate: 0.35
+    buffer_months:
+      lo: 0.25
+      hi: 1.00
+
+# -- Merchants ----------------------------------------------------------------
+merchants:
+  - {merchant_id: MERCH_001, name: "Rhythmiq Music",  category: streaming, plans: [129, 199, 299],    plan_weights: [0.45, 0.35, 0.20]}
+  - {merchant_id: MERCH_002, name: "StreamBox Video", category: streaming, plans: [199, 499, 649],    plan_weights: [0.40, 0.40, 0.20]}
+  - {merchant_id: MERCH_003, name: "PulseFit Gyms",   category: fitness,   plans: [999, 1499, 2499],  plan_weights: [0.45, 0.35, 0.20]}
+  - {merchant_id: MERCH_004, name: "Sculpt Yoga",     category: fitness,   plans: [499, 799],         plan_weights: [0.60, 0.40]}
+  - {merchant_id: MERCH_005, name: "Kernel Cloud",    category: saas,      plans: [499, 1499, 4999],  plan_weights: [0.50, 0.35, 0.15]}
+  - {merchant_id: MERCH_006, name: "Draftly Docs",    category: saas,      plans: [299, 899],         plan_weights: [0.65, 0.35]}
+  - {merchant_id: MERCH_007, name: "LearnLoop",       category: education, plans: [799, 1999, 3499],  plan_weights: [0.50, 0.32, 0.18]}
+  - {merchant_id: MERCH_008, name: "SafeGuard Term",  category: insurance, plans: [1200, 2400, 4800], plan_weights: [0.45, 0.35, 0.20]}
+  - {merchant_id: MERCH_009, name: "Metro Broadband", category: utilities, plans: [599, 899, 1299],   plan_weights: [0.40, 0.38, 0.22]}
+  - {merchant_id: MERCH_010, name: "CityGas Connect", category: utilities, plans: [350, 550],         plan_weights: [0.60, 0.40]}
+
+# -- Mandates -----------------------------------------------------------------
+mandate:
+  # max_cap is set by the merchant above the debit amount (headroom for plan
+  # upgrades). Drawn as a multiplier on the amount, then rounded up.
+  max_cap_multiplier:
+    lo: 1.2
+    hi: 2.5
+  cap_rounding: 100
+  # NPCI per-debit ceiling without per-transaction PIN. Context only: no
+  # generated amount approaches it.
+  regulatory_cap: 15000
+
+  frequency:
+    weights: {monthly: 0.87, quarterly: 0.10, annual: 0.03}
+    # Non-monthly mandates bill a larger amount. This is what makes the
+    # advisory cohort insight in CLAUDE.md section 5 measurable rather than
+    # asserted: bigger, rarer debits should fail harder.
+    amount_multiplier: {monthly: 1.0, quarterly: 2.7, annual: 10.0}
+    # A mandate presents on cycles where (cycle_number - 1) % modulo == 0.
+    cycle_modulo: {monthly: 1, quarterly: 3, annual: 12}
+
+  # Subscription debit days bunch around round dates in the real world. This is
+  # what makes concurrent_debits_same_day a signal rather than noise.
+  debit_day:
+    clustered_share: 0.75
+    days:        [1, 2, 3, 5, 7, 10, 15, 20, 25, 28]
+    day_weights: [0.16, 0.10, 0.08, 0.12, 0.09, 0.13, 0.12, 0.08, 0.06, 0.06]
+    uniform_range: [1, 28]
+
+  created_at_lookback_months:
+    lo: 1
+    hi: 30
+  # Validity remaining at the start of the simulation. A mandate whose
+  # remaining validity lands inside the simulated window expires during it,
+  # produces exactly one mandate_expired decline, and then stops presenting -
+  # which is what a real merchant system does. Presenting month after month
+  # against a dead mandate would inflate the failure rate with an artifact.
+  remaining_validity_months:
+    lo: 3
+    hi: 60
+
+  # Per-cycle hazards. A live mandate can die between cycles.
+  lifecycle:
+    revoke_hazard_per_cycle: 0.0060
+    pause_hazard_per_cycle: 0.0040
+    account_closed_hazard_per_cycle: 0.0015
+    # Payers who have just failed are likelier to walk away.
+    post_failure_hazard_multiplier: 2.5
+
+# -- PSPs ---------------------------------------------------------------------
+# base_health is the probability the PSP leg completes, independent of balance.
+psps:
+  - {handle: "@okhdfcbank", weight: 0.22, base_health: 0.994}
+  - {handle: "@oksbi",      weight: 0.20, base_health: 0.990}
+  - {handle: "@okicici",    weight: 0.15, base_health: 0.993}
+  - {handle: "@ybl",        weight: 0.13, base_health: 0.991}
+  - {handle: "@okaxis",     weight: 0.12, base_health: 0.990}
+  - {handle: "@paytm",      weight: 0.10, base_health: 0.988}
+  - {handle: "@ibl",        weight: 0.08, base_health: 0.986}
+
+# Degradation events give PSP health temporal structure: a bad span of days
+# followed by recovery. Without this, psp_health_index would be a constant.
+psp_degradation:
+  events_per_psp_per_month: 0.35     # Poisson rate
+  duration_days: {lo: 1, hi: 4}
+  health_drop:  {lo: 0.05, hi: 0.25}
+  recovery_days: 2                   # linear ramp back to base health
+
+# -- Execution slots (IST) ----------------------------------------------------
+# NPCI permits presentation before 10:00, between 13:00-17:00, and after 21:30.
+# The 10:00-12:59 peak is restricted; presenting there draws technical declines.
+#
+# Two distinct rates per slot, deliberately not merged:
+#   restricted_decline_rate - the rail declining a presentation for being in the
+#                             blocked peak. Applies to the peak window only.
+#   residual_technical_rate - background technical noise present in every slot.
+# Merging them would double-count the peak penalty.
+slots:
+  morning:
+    permitted: true
+    window: ["06:00", "09:59"]
+    present_at: "08:30"
+    restricted_decline_rate: 0.0
+    residual_technical_rate: 0.006
+  afternoon:
+    permitted: true
+    window: ["13:00", "16:59"]
+    present_at: "14:30"
+    restricted_decline_rate: 0.0
+    residual_technical_rate: 0.008
+  night:
+    permitted: true
+    window: ["21:30", "23:45"]
+    present_at: "21:45"
+    restricted_decline_rate: 0.0
+    residual_technical_rate: 0.010
+  peak_restricted:
+    permitted: false
+    window: ["10:00", "12:59"]
+    present_at: "11:15"
+    restricted_decline_rate: 0.180
+    residual_technical_rate: 0.010
+
+# How the industry actually presents debits today, with no optimisation.
+# This is the world's status quo, NOT a policy the agent may assume.
+baseline_slot_policy:
+  weights: {morning: 0.50, afternoon: 0.28, night: 0.14, peak_restricted: 0.08}
+
+# -- Pre-debit notification ---------------------------------------------------
+pdn:
+  permitted_lead_hours: [24, 36, 48]
+  baseline_lead_hours: 24            # status quo: fixed offset, no targeting
+  min_lead_hours: 24                 # NPCI floor
+  max_lead_hours: 48                 # practical processor ceiling
+  late_night_cutoff: "23:50"         # requests at/after this are rejected
+
+  # p_topup = responsiveness * lead_factor * shortfall_factor
+  lead_factor: {24: 0.55, 36: 0.78, 48: 0.90}
+
+  responsiveness:
+    distribution: beta
+    alpha: 2.0
+    beta: 2.3
+    lo: 0.0
+    hi: 0.75
+
+  # shortfall_factor = 1 / (1 + (shortfall / (monthly_income * ref_ratio)) ** shape)
+  # Being short Rs 200 is easy to cover; being short Rs 8,000 is not.
+  shortfall_reference_ratio: 0.12
+  shortfall_decay_shape: 1.0
+  # A payer who tops up brings in slightly more than the exact amount due.
+  topup_headroom_multiplier: 1.15
+
+  # Intervention is never free: a PDN can prompt the payer to walk away.
+  cancel_hazard: {24: 0.008, 36: 0.010, 48: 0.012}
+  # Split of that hazard between an outright revoke and a pause.
+  cancel_revoke_share: 0.55
+
+# -- Status-quo retry behaviour -----------------------------------------------
+# Today's industry default: a fixed cron, fired regardless of decline code.
+# This populates attempts.parquet with realistic history. Phase 5 re-simulates
+# under its own arms; nothing here constrains the agent.
+baseline_retry_policy:
+  offsets_days: [1, 3, 7]
+  max_attempts: 3                    # NPCI hard cap: 1 original + 3 retries
+  retry_terminal_codes: true         # the naive world wastes attempts
+  slot_weights: {morning: 0.50, afternoon: 0.28, night: 0.14, peak_restricted: 0.08}

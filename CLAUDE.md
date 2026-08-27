@@ -458,19 +458,37 @@ An **honest exception list** ships alongside: mandates the system could not save
 
 > Claude Code: update this section as work completes. Mark `[x]`, add the date, and note anything that deviated from spec. This is state, not a plan — keep it accurate.
 
-### Phase 0 — Foundation · target 27–28 Aug
-- [ ] Repo skeleton, `requirements.txt`, `Makefile`
-- [ ] `config/simulator.yaml` with all world parameters
-- [ ] `config/decline_codes.yaml` taxonomy (terminal vs recoverable)
-- [ ] `simulator/entities.py` — Payer, Mandate, DebitCycle, RetryAttempt
-- [ ] `simulator/balance_model.py` — income cycle, spend drift, competing debits
-- [ ] `simulator/outcome_model.py` — balance + slot → outcome + decline code
-- [ ] Cross-merchant structure: each payer holds 3–5 mandates across merchants
-- [ ] `simulator/generate.py` CLI, fully seeded
-- [ ] Ground truth written to a **separate** artifact from observable data
-- [ ] `tests/test_determinism.py` — same seed, same output
-- [ ] Sanity check: baseline failure rate lands in 8–15%
-- [ ] `docs/ASSUMPTIONS.md` started
+### Phase 0 — Foundation · target 27–28 Aug — **COMPLETE 27 Aug 2026**
+- [x] Repo skeleton, `requirements.txt`, `Makefile` — 27 Aug. Makefile auto-detects `.venv`; `train`/`eval`/`dash` stubs exit 1 rather than 0
+- [x] `config/simulator.yaml` with all world parameters — 27 Aug
+- [x] `config/decline_codes.yaml` taxonomy (terminal vs recoverable) — 27 Aug. 8 codes; `class` and `retry_eligible` cross-checked at load
+- [x] `simulator/entities.py` — Payer, Mandate, DebitCycle, RetryAttempt — 27 Aug
+- [x] `simulator/balance_model.py` — income cycle, spend drift, competing debits — 27 Aug
+- [x] `simulator/outcome_model.py` — balance + slot → outcome + decline code — 27 Aug
+- [x] Cross-merchant structure: each payer holds 3–5 mandates across merchants — 27 Aug. Distinct merchants enforced and tested
+- [x] `simulator/generate.py` CLI, fully seeded — 27 Aug
+- [x] Ground truth written to a **separate** artifact from observable data — 27 Aug. Split enforced by `to_observable_dict`, not by discipline
+- [x] `tests/test_determinism.py` — same seed, same output — 27 Aug. 13 tests: determinism, plausibility, cross-merchant structure, leakage boundary
+- [x] Sanity check: baseline failure rate lands in 8–15% — 27 Aug. **12.59% mean** across 5 seeds (11.69–13.28%), `insufficient_funds` ~50% of failures
+- [x] `docs/ASSUMPTIONS.md` started — 27 Aug. ~70 rows, every number tagged Regulatory / Published / Reasoned / Guess
+
+**Deviations from spec, all logged in `docs/ASSUMPTIONS.md` §10:**
+- Added `simulator/config.py` (YAML loading + taxonomy validation) and
+  `simulator/pdn_model.py` (payer response to a notification) — neither is in
+  the §7 tree; both exist to keep one responsibility per module.
+- `config/policy.yaml` deliberately **not** created: Phase 2 owns it, and
+  writing it now would mean inventing EV costs outside this phase's scope.
+- `attempts.parquet` is populated by a naive T+1/T+3/T+7 status-quo retry cron.
+  The spec asks for the artifact but not its contents; an empty one would mean
+  the historical data contains no retry behaviour at all.
+- Quarterly (10%) and annual (3%) mandates added, so the §5 advisory cohort
+  insight is measurable rather than asserted.
+- `psp_handle` denormalised onto `mandates.parquet` — genuinely observable, and
+  the specified observable artifact set has no payer table to carry it.
+- `docs/FAILURES.md` started early (spec places it in Phase 6), because Phase 0
+  produced four entries worth recording while they were still accurate.
+
+**Started early / carried forward:** `docs/FAILURES.md`.
 
 ### Phase 1 — Predictor · target 29–30 Aug
 - [ ] `predictor/features.py` — all §10 features, observable only

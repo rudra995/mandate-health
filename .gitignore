@@ -1,0 +1,15 @@
+# Generated data: fully regenerable from a seed, never committed.
+data/*
+!data/ground_truth/
+data/ground_truth/*
+!data/ground_truth/README.md
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.pkl
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+.DS_Store
