@@ -355,6 +355,133 @@ than a value that is constant in expectation.
 
 ---
 
+## 9c. Phase 1 — predictor
+
+### The prediction target, and what it does not mean
+
+The label is the observed outcome of the *original presentation* for each
+cycle, under Phase 0's status-quo baseline policy (fixed 24h PDN, baseline
+slot weights) — not the ground-truth counterfactual outcome with no
+intervention at all.
+
+**Consequence, stated here as instructed and again in `predictor/train.py`'s
+docstring so it cannot be missed in either place:** `p_fail` from this model
+estimates failure probability *under the historical baseline policy*. Phase
+2's EV formula computes an uplift from taking an action; that uplift is
+improvement relative to this baseline, not relative to doing nothing. The
+ground-truth counterfactual is used nowhere in `predictor/` — it is reserved
+for Phase 5's evaluation harness, the only place in the project allowed to
+grade against it. | Reasoned |
+
+### Cross-merchant ablation — measured, not assumed
+
+`predictor/features.py::build_features` takes a `scope` parameter
+(`"cross_merchant"` default, `"merchant_only"` an ablation) that re-scopes
+every payer-derived feature — including `concurrent_debits_same_day`, forced
+to 0 under `merchant_only` since a lone merchant structurally cannot see
+another merchant's debit — to what a single merchant's own book alone could
+see. Same model, same hyperparameters, same payer split.
+
+**Result: the aggregator scope did not measurably outperform the
+merchant-only scope on this dataset.** Point estimate: merchant-only AUC
+0.7558 vs cross-merchant (aggregator) AUC 0.7484 — the wrong direction for the
+pitch. A paired bootstrap 95% CI on the gap is [-0.038, +0.024], crossing
+zero. Full writeup, the likely mechanism (a shrinkage design in
+`dom_fail_propensity` that may dilute a mature mandate's own strong
+same-day-of-month autocorrelation with a broader cross-merchant blend rather
+than adding to it), and what this does and does not mean for the aggregator
+argument as a whole: `docs/RESULTS.md`, "Cross-merchant ablation" section.
+The originally intended README headline claiming a measured aggregator
+advantage is **not used**, because the measurement does not support it. |
+Measured |
+
+**Follow-up (additive, not substitution): also null.** The substitution
+ablation above has a confound — it never tested whether cross-merchant
+information helps *on top of* same-mandate history, which is what CLAUDE.md
+§3 actually claims. A follow-up was pre-registered in `docs/RESULTS.md`
+("Additive cross-merchant test") — hypothesis, exact feature spec, and
+decision rule committed in writing before running, one run, no parameter
+search — and also came back null: adding two other-merchants-only columns
+(`dom_fail_propensity_other_merchants`,
+`concurrent_debits_same_day_other_merchants`) to the merchant-only baseline
+scored *lower* (AUC 0.7410 vs 0.7558), 95% CI on the gap [-0.035, +0.007].
+Implemented in `predictor/additive_ablation.py`, a one-off diagnostic not
+part of the `make train` pipeline. Full account: `docs/RESULTS.md`,
+`docs/FAILURES.md` #9. | Measured |
+
+**Consequence: the aggregator argument is reframed on actuation, not
+prediction.** CLAUDE.md §3 names two things a merchant cannot do — see a
+payer across merchants, and control the timing levers (PDN offset, execution
+slot, retry budget). Both ablations tested only the first half and found no
+measurable effect at this scale. The second half needs no model to confirm
+it: it is a structural fact about which party can call which API, true
+regardless of any AUC number. The demonstrated aggregator advantage in this
+build is in what the platform layer can *do* with a risk score — not in
+producing a materially better risk score than a well-built single-merchant
+baseline. This framing survives both null results and does not depend on a
+number a different seed or a larger population could flip. | Reasoned |
+
+### `concurrent_debits_same_day` — known weak signal, not regenerated over
+
+Ranks 13th of 15 features by gain (see `docs/RESULTS.md`), with an
+essentially flat univariate relationship to failure. The likely cause: which
+of two same-day debits is presented "first" and gets first claim on a thin
+balance is arbitrary in the simulator (ascending `mandate_id` — §3 above),
+so the raw concurrent-debit count is a noisier proxy for risk than a payer's
+own accumulated outcome history. This was not fixed by regenerating Phase 0's
+world with a different ordering rule: the cost of a late-phase Phase 0 change
+outweighs the benefit at this point, and — the more important reason — **the
+real-world ordering of simultaneous presentations is genuinely arbitrary
+too.** A real aggregator batching same-slot debits does not control, and
+likely cannot observably reconstruct, which of two debits an issuer processed
+microseconds before the other. If the signal is weak here for exactly that
+reason, it is plausibly weak in production for the same reason, not solely a
+simulator artifact worth "fixing." Logged as a known limitation rather than
+patched. | Reasoned |
+
+### Cold-start handling
+
+**Chosen: missing indicator, let the tree route it** (`is_cold_start` flag,
+all payer-derived features left `NaN` for a payer's first-ever presentation),
+over the alternative of filling with a population prior. Confirmed by the
+training run to matter less than expected in one respect worth recording
+honestly: `is_cold_start` itself carries zero gain in the trained model (see
+`docs/RESULTS.md`), because six correlated features are simultaneously `NaN`
+on exactly the same rows, so LightGBM's missing-value routing on any one of
+them already isolates cold-start rows without needing the explicit flag. The
+flag was not wasted effort — it is what makes the *choice* legible in the
+data and the code, and a different model (or a smaller feature set) could
+plausibly need it — but the experiment showed the underlying strategy (NaN +
+tree routing, not a population-prior fill) is sufficient on its own here. |
+Reasoned, confirmed |
+
+### Calibration method
+
+**Chosen: isotonic regression**, fit on a calibration payer split disjoint
+from both train and test (1,720 rows, ~80 payers). Reduced expected
+calibration error from 0.024 (raw) to 0.014 (calibrated) on the test set — see
+`docs/RESULTS.md`. The stated tradeoff (isotonic needs more calibration data
+than Platt scaling to avoid overfitting its own step function) was watched
+for and not observed to be a problem at this payer count; it would be a live
+concern at a materially smaller calibration split. | Reasoned, confirmed |
+
+### Feature-engineering constants invented for `predictor/features.py`
+
+None of these were fit to any prediction outcome. All are structural choices
+about how much history to pool before shrinking toward a payer's own base
+rate.
+
+| Parameter | Value | Basis | Confidence |
+|---|---|---|---|
+| `dom_fail_propensity` window | ±3 days (cyclic, 1–28) | Wide enough that a payer with only 3–5 mandates has more than one debit day inside the window most of the time; narrow enough to stay a "near this day" signal rather than a whole-month average | Guess |
+| `dom_fail_propensity` shrinkage strength (`alpha`) | 3.0 "virtual" observations toward the payer's own overall rate | Bayesian shrinkage so a payer with one or two observations in the window is not treated as if that were a stable rate. Shrinkage target is the payer's own overall rate, never a population figure — kept consistent with the cold-start rule that payer-derived features never fall back to a population constant | Guess |
+| PSP rolling window | trailing 30 presentations, global across all payers sharing a handle, strictly before the current date | Config's PSP degradation events last 1–4 days (`psp_degradation.duration_days`); 30 presentations is short enough for a multi-day event to visibly move the index, long enough not to be single-debit noise | Reasoned |
+| Payer split fractions | 60% train / 20% calibration / 20% test | Large enough test and calibration sets to make Brier score and per-bin calibration checks stable at n=400 payers, without starving the model of training payers | Guess |
+| Internal early-stopping split (train payers only) | 85% fit / 15% early-stop | Kept separate from the calibration split specifically so the calibration set is never used to choose the training round count — using it for both would mean the "held-out" calibration data had already influenced the model it is calibrating | Reasoned |
+| LightGBM hyperparameters (`num_leaves=7`, `learning_rate=0.05`, `min_child_samples=40`) | — | Not guessed: chosen by comparing four modest configurations on the internal early-stop split (never calibration or test). The smallest model won on both AUC and Brier, consistent with ~5,000 training rows over 14 features — the losing configurations are recorded in `predictor/train.py`'s module docstring | Measured |
+
+---
+
 ## 10. Deviations from CLAUDE.md §8 schemas
 
 Recorded so the difference is visible rather than discovered.
@@ -372,3 +499,8 @@ Recorded so the difference is visible rather than discovered.
 | `conftest.py` | Added at the repo root | Puts the repo root on `sys.path` so `pytest` works from anywhere without an installed package |
 | Status-quo retries generated in Phase 0 | `attempts.parquet` is populated by a naive T+1/T+3/T+7 cron | The spec asks for the artifact but not its contents. Leaving it empty would mean the historical data contains no retry behaviour at all, and the wasteful default is precisely what Phase 3 exists to improve on. Phase 5 re-simulates under its own arms, so nothing here constrains the agent |
 | Quarterly / annual mandates | 10% / 3% of mandates, with ×2.7 / ×10 amounts | Not requested. Included so the advisory cohort insight in CLAUDE.md §5 ("your annual debit fails more often than the monthly one") is a measurement rather than an assertion |
+| `build_features` return type | Returns a `FeatureSet(meta, X, y)` named triple rather than the `(X, y)` pair the Phase 1 prompt sketches | Every downstream consumer (split, leakage tests, audit joins) needs `payer_id`/`cycle_id`/`scheduled_date` alongside the numeric matrix. Smuggling identifiers into `X` would make "assert zero hidden columns" ambiguous about which columns are candidates |
+| `is_cold_start` feature | Added beyond the fourteen features named in CLAUDE.md §10 | Required by the Phase 1 prompt's cold-start handling instruction. Declared as a separate `AUXILIARY_FEATURE_COLUMNS` constant in `predictor/features.py` rather than folded into the §10 list silently — see §9c for what the training run found about it |
+| `predictor/diagnostics.py`, `predictor/split.py`, `predictor/calibrate.py` | Modules not in the §7 tree (which lists only `features.py`, `train.py`, `calibrate.py`, `model.py` — `calibrate.py` matches, the other two do not) | One module, one responsibility: payer/temporal splitting, calibration, and figure generation are three distinct concerns the Phase 1 prompt itself separates into distinct deliverables |
+| `scripts/day_of_month_diagnostic.py` | New top-level `scripts/` directory, not in the §7 tree | This diagnostic legitimately needs `data/ground_truth/payers.parquet` to validate that the day-of-month signal `predictor/` is asked to recover (blind to true payday) actually exists. `tests/test_leakage.py` forbids any `ground_truth` reference inside `predictor/`, so the script lives outside it, by design, rather than as an exception to the rule |
+| `data/model/` | Trained model artifacts (booster, calibrator, metadata) written here | Follows the existing `data/` convention (gitignored, regenerable from a seed) rather than introducing a new top-level directory for something `make train` recreates deterministically |

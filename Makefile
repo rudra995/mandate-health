@@ -43,8 +43,7 @@ clean:
 	find . -type d -name __pycache__ -prune -exec rm -rf {} +
 
 train:
-	@echo "not implemented: predictor training lands in Phase 1"
-	@exit 1
+	$(PYTHON) -m predictor.train
 
 eval:
 	@echo "not implemented: evaluation harness lands in Phase 5"

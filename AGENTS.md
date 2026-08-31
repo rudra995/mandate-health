@@ -1,7 +1,7 @@
-# CLAUDE.md — Mandate Health Service
+# AGENTS.md — Mandate Health Service
 
 > **This file is the single source of truth for this project.**
-> Claude Code: read this before any task. If something here conflicts with an
+> Codex: read this before any task. If something here conflicts with an
 > instruction in a prompt, flag the conflict instead of silently picking one.
 > Update the checklist in §16 as work completes — that section is live state,
 > not documentation.
@@ -72,7 +72,7 @@ Additionally, Razorpay already **owns every lever**: it triggers the PDN, choose
 
 ## 4. Domain primer — hard rules (do not violate, do not invent around)
 
-Claude Code: these are researched regulatory facts, not design preferences. Any code path that violates one is a bug.
+Codex: these are researched regulatory facts, not design preferences. Any code path that violates one is a bug.
 
 ### 4.1 Pre-debit notification (PDN)
 - Must reach the payer **at least 24 hours** before debit execution.
@@ -190,7 +190,7 @@ Nothing downstream is testable until the simulator is trustworthy.
 
 ```
 mandate-health/
-├── CLAUDE.md                    ← this file
+├── AGENTS.md                    ← this file
 ├── README.md                    ← public-facing pitch + results
 ├── requirements.txt
 ├── Makefile                     ← make data / train / eval / dash
@@ -456,66 +456,32 @@ An **honest exception list** ships alongside: mandates the system could not save
 
 ## 16. Live checklist
 
-> Claude Code: update this section as work completes. Mark `[x]`, add the date, and note anything that deviated from spec. This is state, not a plan — keep it accurate.
+> Codex: update this section as work completes. Mark `[x]`, add the date, and note anything that deviated from spec. This is state, not a plan — keep it accurate.
 
-### Phase 0 — Foundation · target 27–28 Aug — **COMPLETE 27 Aug 2026**
-- [x] Repo skeleton, `requirements.txt`, `Makefile` — 27 Aug. Makefile auto-detects `.venv`; `train`/`eval`/`dash` stubs exit 1 rather than 0
-- [x] `config/simulator.yaml` with all world parameters — 27 Aug
-- [x] `config/decline_codes.yaml` taxonomy (terminal vs recoverable) — 27 Aug. 8 codes; `class` and `retry_eligible` cross-checked at load
-- [x] `simulator/entities.py` — Payer, Mandate, DebitCycle, RetryAttempt — 27 Aug
-- [x] `simulator/balance_model.py` — income cycle, spend drift, competing debits — 27 Aug
-- [x] `simulator/outcome_model.py` — balance + slot → outcome + decline code — 27 Aug
-- [x] Cross-merchant structure: each payer holds 3–5 mandates across merchants — 27 Aug. Distinct merchants enforced and tested
-- [x] `simulator/generate.py` CLI, fully seeded — 27 Aug
-- [x] Ground truth written to a **separate** artifact from observable data — 27 Aug. Split enforced by `to_observable_dict`, not by discipline
-- [x] `tests/test_determinism.py` — same seed, same output — 27 Aug. 13 tests: determinism, plausibility, cross-merchant structure, leakage boundary
-- [x] Sanity check: baseline failure rate lands in 8–15% — 27 Aug. **12.59% mean** across 5 seeds (11.69–13.28%), `insufficient_funds` ~50% of failures
-- [x] `docs/ASSUMPTIONS.md` started — 27 Aug. ~70 rows, every number tagged Regulatory / Published / Reasoned / Guess
+### Phase 0 — Foundation · target 27–28 Aug
+- [ ] Repo skeleton, `requirements.txt`, `Makefile`
+- [ ] `config/simulator.yaml` with all world parameters
+- [ ] `config/decline_codes.yaml` taxonomy (terminal vs recoverable)
+- [ ] `simulator/entities.py` — Payer, Mandate, DebitCycle, RetryAttempt
+- [ ] `simulator/balance_model.py` — income cycle, spend drift, competing debits
+- [ ] `simulator/outcome_model.py` — balance + slot → outcome + decline code
+- [ ] Cross-merchant structure: each payer holds 3–5 mandates across merchants
+- [ ] `simulator/generate.py` CLI, fully seeded
+- [ ] Ground truth written to a **separate** artifact from observable data
+- [ ] `tests/test_determinism.py` — same seed, same output
+- [ ] Sanity check: baseline failure rate lands in 8–15%
+- [ ] `docs/ASSUMPTIONS.md` started
 
-**Deviations from spec, all logged in `docs/ASSUMPTIONS.md` §10:**
-- Added `simulator/config.py` (YAML loading + taxonomy validation) and
-  `simulator/pdn_model.py` (payer response to a notification) — neither is in
-  the §7 tree; both exist to keep one responsibility per module.
-- `config/policy.yaml` deliberately **not** created: Phase 2 owns it, and
-  writing it now would mean inventing EV costs outside this phase's scope.
-- `attempts.parquet` is populated by a naive T+1/T+3/T+7 status-quo retry cron.
-  The spec asks for the artifact but not its contents; an empty one would mean
-  the historical data contains no retry behaviour at all.
-- Quarterly (10%) and annual (3%) mandates added, so the §5 advisory cohort
-  insight is measurable rather than asserted.
-- `psp_handle` denormalised onto `mandates.parquet` — genuinely observable, and
-  the specified observable artifact set has no payer table to carry it.
-- `docs/FAILURES.md` started early (spec places it in Phase 6), because Phase 0
-  produced four entries worth recording while they were still accurate.
-
-**Started early / carried forward:** `docs/FAILURES.md`.
-
-### Phase 1 — Predictor · target 29–30 Aug — **COMPLETE 27 Aug 2026**
-- [x] `predictor/features.py` — all §10 features, observable only — 27 Aug. Plus `is_cold_start` (logged deviation, §9c/§10 of ASSUMPTIONS.md)
-- [x] `tests/test_leakage.py` passing (no hidden columns, no forbidden imports) — 27 Aug. 8 tests: hidden-column scan, import-graph + AST path-literal scan, temporal-boundary corruption probe, `as_of_cycle` truncation equivalence, payer-split disjointness + reproducibility
-- [x] Payer-level train/test split — 27 Aug. Three-way 60/20/20 train/calibration/test in `predictor/split.py`, plus a secondary temporal-holdout sanity check
-- [x] `predictor/train.py` — gradient boosting — 27 Aug. LightGBM, `num_leaves=7` chosen by comparing 4 configs on an internal train-only early-stop split (never calibration/test)
-- [x] `predictor/calibrate.py` — isotonic/Platt — 27 Aug. Isotonic chosen (see ASSUMPTIONS §9c). ECE 0.024 → 0.014
-- [x] Reliability diagram generated — 27 Aug. `docs/figures/reliability_diagram.png`
-- [x] AUC + Brier score recorded in `docs/RESULTS.md` — 27 Aug. Full model AUC 0.750 / Brier 0.087 (raw), 0.086 (calibrated), vs trivial 0.500/0.109 and single-feature 0.569/0.107
-- [x] Feature importance chart — 27 Aug. `docs/figures/feature_importance.png`. `dom_fail_propensity` ranks #1; `concurrent_debits_same_day` ranks 13/15 (weak) — reported honestly in RESULTS.md, not adjusted away
-- [x] `predictor/model.py` stable `predict_proba` interface — 27 Aug. Also `explain()` via LightGBM's native `pred_contrib`, `version` as a content hash, `save`/`load`
-
-**Verified before building (per the Phase 1 prompt's gating checks):** counterfactual outcome present (8,349/8,349 non-null); day-of-month signal real and correctly shaped once re-cut by true payday (raw pooled curve is noisy, as expected); population survival healthy at cycle 6 (88.5% of cycle-1 monthly volume). See `docs/RESULTS.md` for the day-of-month diagnostic chart.
-
-**No threshold chosen anywhere** in `predictor/` — precision/recall reported at four illustrative cuts in `evaluate()`, none selected as an operating point. Deferred to Phase 2's EV formula as specified.
-
-**Deviations, all logged in `docs/ASSUMPTIONS.md` §9c/§10:** `build_features` returns a `FeatureSet(meta, X, y)` triple rather than a `(X, y)` pair; `is_cold_start` added beyond the §10 feature list; `predictor/split.py` and `predictor/diagnostics.py` added (not in the §7 tree); a new top-level `scripts/` directory holds `day_of_month_diagnostic.py`, which legitimately reads `data/ground_truth/` for validation and therefore lives outside `predictor/` rather than as an exception to the leakage rule; trained model artifacts saved to `data/model/` (gitignored, regenerable, same convention as the rest of `data/`).
-
-Two issues found and fixed while writing `tests/test_leakage.py`, recorded in `docs/FAILURES.md` #6–7: the temporal-corruption test's own cutoff logic was wrong (cut on `cycle_number` instead of calendar date), and the ground-truth path scan tripped on its own explanatory docstrings before being rewritten to walk the AST.
-
-**Post-completion additions, 27 Aug 2026, requested directly:**
-- [x] Decile lift table — `predictor/diagnostics.py::decile_lift_table`, `docs/figures/decile_lift.png`. Top decile fails at 51.3% (4.13× base rate), decile 2 at 22.6% (1.82×), deciles 3–10 near or below base rate with expected sampling noise. Sets Phase 2's cost parameters against a measured number rather than a guess.
-- [x] Cross-merchant ablation — `predictor/ablation.py`, one `scope` parameter added to `build_features`. **Result did not confirm the aggregator thesis**: merchant-only AUC 0.7558 vs cross-merchant AUC 0.7484, bootstrap 95% CI on the gap [-0.038, +0.024] crosses zero — not statistically distinguishable at this sample size. Full account and mechanism in `docs/RESULTS.md` and `docs/FAILURES.md` #8. **The originally planned README headline claiming a measured aggregator advantage is not used** — the measurement does not support it. The aggregator argument as stated in §3 (a claim about data visibility) is not itself falsified by this; the narrower claim that *this feature design at this scale* converts that visibility into measurably better prediction is.
-- [x] `concurrent_debits_same_day` weak-signal finding logged as a known limitation in `docs/ASSUMPTIONS.md` §9c rather than fixed by regenerating Phase 0 — same-day presentation order is arbitrary in both the simulator and, plausibly, in production.
-- [x] Additive follow-up ablation — `predictor/additive_ablation.py`, pre-registered in `docs/RESULTS.md` (hypothesis, feature spec, decision rule written before running) to fix the first ablation's confound: substitution was tested, not addition. **Also null**: adding two other-merchants-only columns to the merchant-only baseline scored *lower* (AUC 0.7410 vs 0.7558), 95% CI on the gap [-0.035, +0.007]. One run, no parameter search, per the pre-registered rule. Full account in `docs/RESULTS.md` and `docs/FAILURES.md` #9.
-
-**Reframe adopted as a result of both null results, recorded here as the finding — §3's own prose is the user's pitch language and was intentionally left untouched rather than silently rewritten (§18 rule 3):** the aggregator advantage this build demonstrates is in **actuation** (PDN timing, execution slot, retry-budget allocation — regulatory/structural facts, true independent of any model's AUC), not in producing a measurably better risk score than a well-built single-merchant baseline at this data scale. Worth reflecting in §3's own text and in the eventual README when those are next revised.
+### Phase 1 — Predictor · target 29–30 Aug
+- [ ] `predictor/features.py` — all §10 features, observable only
+- [ ] `tests/test_leakage.py` passing (no hidden columns, no forbidden imports)
+- [ ] Payer-level train/test split
+- [ ] `predictor/train.py` — gradient boosting
+- [ ] `predictor/calibrate.py` — isotonic/Platt
+- [ ] Reliability diagram generated
+- [ ] AUC + Brier score recorded in `docs/RESULTS.md`
+- [ ] Feature importance chart
+- [ ] `predictor/model.py` stable `predict_proba` interface
 
 ### Phase 2 — Policy engine · target 31 Aug – 1 Sep
 - [ ] `config/policy.yaml` — uplifts, costs, penalties, all justified in ASSUMPTIONS
@@ -609,7 +575,7 @@ The four-arm comparison table with mean ± spread across seeds, plus a grouped b
 - **Tests are not optional** in `tests/test_leakage.py` and `tests/test_compliance.py`. Those two encode the project's credibility.
 - **No network calls** except the LLM explanation call in `audit/explain.py`.
 
-### Working rules for Claude Code sessions
+### Working rules for Codex sessions
 1. One module per session. Do not attempt a whole phase in one pass.
 2. After writing a module, explain it back: what each function does and why.
 3. The EV formula and the feature list are **author-owned** — propose changes, do not silently rewrite them.
@@ -667,4 +633,4 @@ Declaring limitations is a credibility move. `README.md` must carry this section
 
 ---
 
-*End of CLAUDE.md. Keep §16 current.*
+*End of AGENTS.md. Keep §16 current.*

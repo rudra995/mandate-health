@@ -1,7 +1,9 @@
 # Python 3.11+
 # Phase 0 (simulator) needs: numpy, pandas, pyarrow, pyyaml, pytest.
-# lightgbm / scikit-learn / streamlit are pinned now so the environment is
-# stable across phases, even though Phase 0 does not import them.
+# Phase 1 (predictor) adds: scikit-learn (isotonic calibration), lightgbm
+# (gradient boosting + native SHAP contributions), matplotlib (reliability
+# diagram, feature importance chart), joblib (calibration-map serialisation).
+# streamlit is pinned now for Phase 6 even though nothing imports it yet.
 numpy==2.1.3
 pandas==2.2.3
 pyarrow==18.1.0
@@ -9,4 +11,6 @@ PyYAML==6.0.2
 pytest==8.3.4
 scikit-learn==1.6.0
 lightgbm==4.5.0
+matplotlib==3.9.2
+joblib==1.5.3
 streamlit==1.41.1
